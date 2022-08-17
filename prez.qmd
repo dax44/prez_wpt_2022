@@ -1,0 +1,368 @@
+---
+title: "Estymacja efektów na podstawie modeli liniowych"
+author: Dariusz Majerek
+language: polski.yml
+format: 
+  revealjs:
+    logo: logo.png
+    footer: "Inauguracja roku akademickiego 2022/2023 na Wydziale Podstaw Techniki"
+    smaller: true
+    theme: serif
+    transition: convex
+    transition-speed: slow
+editor: visual
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+---
+
+## Czym się zajmuję?
+
+-   Prowadzę zajęcia akademickie z zakresu szeroko rozumianej statystyki (statystyka matematyczna, statystyczne modele liniowe i nieliniowe, wielowymiarowa analiza danych, planowanie eksperymentu, eksploracja danych i uczenie maszynowe i wiele innych.
+-   Prace naukowe prowadzę w oparciu o zastosowania metod ilościowych w następujących dziedzinach: inżynierii środowiska, chemia, medycyna, ekonomia i inne.
+-   Jestem autorem wielu opracowań statystycznych w ramach badań komercyjnych prowadzonych dla podmiotów prywatnych i publicznych (m.in. Toyota Poland, Netrix S.A., Ernst & Young, Urząd Marszałkowski Województwa Wielkopolskiego).
+
+## Wprowadzenie
+
+Analiza związków przyczynowo-skutkowych z wykorzystaniem metod ilościowych to bardzo trudne zadanie ze względu na kilka przyczyn:
+
+-   nasza wiedza bazuje na próbie (często tylko jednej)
+
+-   często nie znamy charakteru zależności pomiędzy cechami (liniowa, nieliniowa)
+
+-   wysoka korelacja nie koniecznie oznacza związek przyczynowo-skutkowy
+
+-   nie możemy w badaniu kontrolować wszystkich zmiennych
+
+Metodologia badań związków przyczynowo-skutkowych podaje, że aby orzec o pewnej zależności , że jest związkiem przyczynowo-skutkowym **przyczyna musi poprzedzać skutek**, **musi być z nim skorelowana** i należy **wykluczyć wpływ innych czynników** mogących mieć wpływ na skutek.
+
+## Pozorne korelacje
+
+![Przykład pozornej korelacji na poziomie 0.998 (https://www.tylervigen.com/spurious-correlations)](chart.png){#fig-pozkor width="739"}
+
+------------------------------------------------------------------------
+
+::: {#exm-0}
+## wprowadzający
+
+Badania na pojemnością płuc (ang. *FEV - forced expiratory volume*) wśród 606 dzieci w wieku od 6 do 17 lat, miały na celu wykazać negatywny wpływ palenia papierosów (zmienna `smoking`) na wspomnianą pojemność (zmienna `fev`). Zbiór danych zawierał ponadto dane na temat: wieku (`age`), wzrostu (`height`) i płci (`gender`) badanych. Badacze otrzymali nieoczekiwany wyniki kiedy przeprowadzili badanie efektu za pomocą regresji liniowej. Wyniki opisuje następujący model:
+
+$$
+\widehat{fev} = \underset{***}{2,63}+\underset{***}{0.61}\cdot smoking.
+$$
+
+I choć naturalnym podejściem w tym przypadku byłoby zastosowanie testu Manna-Whitneya, to rozwiązanie z wykorzystaniem modelu liniowego jest również poprawne ponieważ pozwala zarówno na stwierdzenie istotności efektu, jak i na ocenę jego wielkości. Skąd zatem pozytywny wpływ palenia na pojemność płuc?
+:::
+
+## Rodzaje zmiennych w modelu
+
+Wpływ na oszacowany efekt pewnej zmiennej niezależnej mogą mięć inne zmienne uwzględniane lub nieuwzględniane w modelu:
+
+-   **zakłócające** (ang. *confounder*) - zmienna, która ma jednocześnie wpływ na przyczynę (X) i skutek (Y),
+-   **towarzyszące** (ang. *covariates*) - zmienne, które nie wykazują zależności z przyczyną ale wpływają na skutek,
+-   **mediatory** (ang. *mediator*) - zmienne, które pośredniczą w związku pomiędzy przyczyną a skutkiem, przy czym przyczyna wpływa na mediator, a mediator wpływa na skutek. Niezależnie od tego, jeśli nie dochodzi do mediacji całkowitej, część zależności pomiędzy X i Y jest realizowana bezpośrednio,
+-   **moderator** (ang. *moderator*) - zmienna, która modyfikuje wpływ X na Y, często rozumiana także jako efekt interakcji przyczyny (X) i moderatora,
+-   **nadmiarowe** (ang. *collinear/redundant*) - zmienne, które są bardzo silnie skorelowane z innymi zmiennymi niezależnymi modelu
+
+## Zmienna zakłócająca
+
+::: columns
+::: {.column width="70%"}
+-   do statystycznej oceny czy zmienna C jest zakłócająca dokonujemy korekty modelu ze względu na zmienną C. Jeśli po włączeniu C do modelu zauważymy *znaczą* zmianę efektu zmiennej X oraz niewielką zmianę błędu standardowego estymacji X, to możemy przypuszczać, że C jest zmienną zakłócającą [@vanderweeleDefinitionConfounder2013];
+-   należy jednak pamiętać, aby zmienna C "nie występowała na ścieżce zależności pomiędzy X i Y";
+-   zmienne zakłócające zawsze powinno się włączać do modelu;
+-   dla @exm-0 zmienną zakłócającą mógłby być wiek.
+:::
+
+::: {.column width="30%"}
+```{mermaid}
+flowchart TB
+  X -- b_XY --> Y
+  C -- b_CX --> X
+  C -- b_CY --> Y
+```
+
+```{mermaid}
+flowchart TB
+  Smoking --> FEV
+  Age --> Smoking
+  Age --> FEV
+```
+:::
+:::
+
+------------------------------------------------------------------------
+
+Kontynuując @exm-0 pokażemy, że faktycznie `age` jest zmienną zakłócającą
+
+```{r}
+#| warning: false
+#| results: asis
+#| label: tbl-conf
+#| tbl-cap: Porównanie modeli
+library(ggstatsplot)
+library(tidyverse)
+library(knitr)
+library(jtools)
+library(datarium)
+library(ggpubr)
+library(easystats)
+library(gtsummary)
+library(modelsummary)
+library(mediation)
+fev <- readRDS("fev.rds")
+fev <- fev |> 
+  mutate(smoking = factor(smoking))
+mod <- lm(fev~smoking, fev)
+mod.adj <- lm(fev~smoking+age, fev)
+modelsummary(list(mod, mod.adj),gof_map = NA, coef_omit = "Intercept", estimate = "{estimate} {stars}", statistic = "({std.error})")
+```
+
+Po włączeniu do modelu zmiennej zakłócającej `age` wpływ `smoking` na `fev` z niezrozumiałego (0.605) zmienił się na bardziej prawdopodobny (-0.236). Przy okazji widzimy również, że wpływ zmiennej zakłócającej `age` na `fev` jest dodatni (0.248) co również zdaje się być właściwe, zważywszy na fakt, iż analiza dotyczy dzieci.
+
+## Zmienne towarzyszące
+
+::: columns
+::: {.column width="70%"}
+-   do statystycznej oceny, czy C jest kowariantem, włączamy ją do modelu, jako efekt addytywny. Jeśli wielkość efektu oddziaływania X na Y nie zmieniła znacznie, a jednocześnie błąd standardowy estymacji efektu X zmalał istotnie, to możemy mówić o zmiennej C, że jest zmienną towarzyszącą;
+
+-   zmienne towarzyszące można zarówno włączać, jak i nie włączać do modelu. Jeśli włączymy kowariant do modelu, to skorygujemy efekt oddziaływania cechy X, ze względu na obecność zmiennej C (poprawimy w ten sposób precyzję efektu b_XY). Czasami jednak nie chcemy korygować efektu oddziaływania X na Y przez włączanie C, szczególnie gdy wpływ C na Y jest nieistotny. Jest to szczególnie zły pomysł, gdy C zależy w pewnym stopniu od X (wówczas wprowadza to dodatkowe obciążenie) [@kahanRisksRewardsCovariate2014].
+:::
+
+::: {.column width="30%"}
+```{mermaid}
+graph TD
+  X -- b_XY --> Y
+  C -- b_CY --> Y
+```
+:::
+:::
+
+------------------------------------------------------------------------
+
+::: {#exm-covariate}
+::: columns
+::: {.column width="60%"}
+Naukowcy badali wpływ ćwiczeń fizycznych na obniżenie poziomu lęku. Dlatego też przeprowadzili eksperyment, w którym zmierzyli wynik lęku u trzech grup osób wykonujących ćwiczenia fizyczne na różnych poziomach intensywności (podstawowym - grp1, umiarkowanym - grp2, wysokim - grp3). Badanie niepokoju (ang. *anxiety*) było przeprowadzone w trzech momentach czasu (t1 - na początku eksperymentu, t2 - w połowie trwania eksperymentu, t3 - na końcu eksperymentu). Badacze przypuszczają, że poziom niepokoju towarzyszący osobie na początku może mieć wpływ na poziom końcowy. Dodatkowo podejrzewają również, że intensywność ćwiczeń może mieć wpływ na poziom niepokoju na końcu badania.
+:::
+
+::: {.column width="40%"}
+```{r}
+#| label: tbl-anx
+#| tbl-cap: Statystyki podstawowe dotyczące niepokoju
+anxiety |> 
+  dplyr::select(-t2, -id) |> 
+  tbl_summary(by = group,
+              statistic = list(everything()~"{mean} ({sd})")) |> 
+  add_p(test = list(everything()~"aov"))
+```
+:::
+:::
+:::
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-cov
+#| fig-height: 7
+#| fig-cap: Analiza związku pomiędzy początkowym i końcowym poziomem niepokoju w podziale na grupy aktywności fizycznej. Zbliżone nachylenia prostych regresji mogą sugerować brak interackji (czyli współoddziaływania poziomu początkowego lęku `t1` i grupy `group` na końcowy poziom zaniepokojenia `t3`). Efekt interakcji weryfikowany testem częściowym F okazał się nieistotny (p=0.41)
+ggscatter(
+  anxiety, x = "t1", y = "t3",
+  color = "group", add = "reg.line"
+  )+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..rr.label.., sep = "~~~~"), color = group)
+    )+
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: tbl-cov
+#| tbl-cap: Porównanie efektów przed i po włączeniu kowariantu
+mod <- lm(t3~t1, data = anxiety)
+mod.adj <- lm(t3~t1+group, data = anxiety)
+# mod.int <- lm(t3~t1*group, data = anxiety)
+
+modelsummary(list(mod, mod.adj),gof_map = NA, coef_omit = "Intercept", estimate = "{estimate} {stars}", statistic = "({std.error})")
+```
+
+Zgodnie z oczekiwaniami włączenie do modelu zmiennej towarzyszącej `group` nie wpłynęła znacząco na wielkość efektu początkowego poziomu lęku (zmiana z 0,966 na 0,987), natomiast blisko trzykrotnie zmniejszył się błąd standardowy estymacji (zmiana z 0,138 do 0,049), co oznacza poprawę precyzji oszacowania efektu.
+
+## Mediatory
+
+::: columns
+::: {.column width="80%"}
+-   istnieje kilka metod statystycznej oceny czy zmienna M jest mediatorem:
+
+    -   Baron-Kenny - porównująca modele regresji pomiędzy analizowanymi zmiennymi z/bez włączania mediatora oraz model opisujący związek pomiędzy X i M,
+
+    -   modelując równania strukturalne (ang. Structural Equation Modeling - SEM),
+
+    -   test Sobela [@sobelAsymptoticConfidenceIntervals1982],
+
+    -   test Preachera-Hayesa (bootstrapowy) [@hayesIndexTestLinear2015];
+
+-   efekt włączenia mediatora powinien być podobny do efektu włączania zmiennej zakłócającej, z tą różnicą, że zmienna M tym razem występuje "na ścieżce zależności pomiędzy X i Y";
+
+-   zazwyczaj mediatora nie włącza się do ostatecznego modelu, poza przypadkami gdy chcemy oszacować bezpośredni i pośredni wpływ X na Y.
+:::
+
+::: {.column width="20%"}
+```{mermaid}
+graph TD
+  X -- b_XY --> Y
+  X -- b_XM --> M
+  M -- b_MY --> Y
+```
+:::
+:::
+
+------------------------------------------------------------------------
+
+::: {#exm-mediator}
+Korzystając z danych z @exm-0 przeprowadzimy badanie związku pomiędzy wiekiem (`age)` a FEV (`fev)` uwzględniając mediator w postaci wzrostu (`height`).
+
+::: columns
+::: {.column width="80%"}
+```{r}
+mod.direct <- lm(fev~age, fev)
+mod.med <- lm(height~age, fev)
+mod.indirect <- lm(fev~age+height, fev)
+
+modelsummary(list("c" = mod.direct, "a" = mod.med, "b" = mod.indirect),gof_map = NA, coef_omit = "Intercept", estimate = "{estimate} {stars}", statistic = "({std.error})")
+```
+
+Spełnione są warunki bycia mediatorem, ponieważ zarówno efekt bezpośredni (c) jest istotny, jak i efekt oddziaływania `age` na `height` (czyli a), a ponadto znacząco zmalał efekt oddziaływania `age` na `fev` po włączeniu do modelu mediatora `height`. Często zdarza się, że po włączeniu mediatora efekt główny przestaje być istotny statystycznie.
+:::
+
+::: {.column width="20%"}
+```{mermaid}
+graph TD
+  age -- c --> FEV
+  age -- a --> height
+  height -- b --> FEV
+```
+:::
+:::
+:::
+
+## Moderator
+
+::: columns
+::: {.column width="80%"}
+-   moderacja, zwana także interakcją - jest współoddziaływaniem efektu głównego X i moderatora M;
+
+-   do oceny czy efekt moderacji występuje stosuje się test interakcji efektów i jeśli jest on istotny, to mamy do czynienia z efektem moderacji;
+
+-   należy jednak pamiętać, że zmienna moderująca nie może występować "na ścieżce zależności pomiędzy X i Y";
+
+-   moderatory co do zasady należy włączać do modelu, ponieważ poprawiają zrozumienie panujących zależności;
+:::
+
+::: {.column width="20%"}
+```{mermaid}
+stateDiagram
+  state join_state <<join>>
+  X --> join_state
+  M --> join_state
+  join_state --> Y
+```
+:::
+:::
+
+------------------------------------------------------------------------
+
+::: {#exm-moderator}
+Przeprowadzono badania wpływu suplementacji diety na długość odontoblastów (czyli komórek odpowiedzialnych za wzrost zębów) u świnek morskich. Każde zwierzę otrzymało jeden z trzech poziomów dawek witaminy C (0,5, 1 i 2 mg/dzień) za pomocą jednej z dwóch metod dostarczania, soku pomarańczowego (kodowana jako OJ) lub kwasu askorbinowego (kodowana jako VC). Jako efekt główny potraktujemy poziom dawkowana (`dose`) a potencjalnym moderatorem będzie sposób dostarczania witaminy C (`supp`).
+
+```{r}
+modXY <- lm(len~dose, ToothGrowth)
+mod.cov<- lm(len~dose+supp, ToothGrowth)
+mod.inter <- lm(len~dose*supp, ToothGrowth)
+
+modelsummary(list("Model 1" = modXY, "Model 2" = mod.cov, "Model 3" = mod.inter),gof_map = NA, coef_omit = "Intercept", estimate = "{estimate} {stars}", statistic = "({std.error})")
+```
+:::
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-tooth
+#| fig-cap: Wykres zależności pomiędzy wielkością dawkowania witaminy C a długością odontoplastów w podziale na sposoby dostarczania witaminy C
+ToothGrowth |> 
+  ggplot(aes(x = dose, y = len, color = supp))+
+  geom_point()+
+  geom_jitter()+
+  geom_smooth(method = lm,
+              se = F)+
+  theme_minimal()
+```
+
+## Zmienne nadmiarowe
+
+-   nadmiarowość to pojęcie używane w przypadku zmiennych objaśniających modelu, które wykazują wysokie korelacje z innymi zmiennymi objaśniającymi (ang. *collinearity*) lub też są kombinacją liniową innych zmiennych objaśniających (ang. *multicollinearity*);
+
+-   w literaturze spotykamy rozróżnienie na całkowitą nadmiarowość (ang. *perfect collinearity*) - gdy wspomniane wyżej związki można wyrazić funkcyjnie; w przypadku gdy wspomniane związki mają charakter stochastyczny mówimy o zwykłej nadmiarowości;
+
+-   do wykrywania nadmiarowości używa się najczęściej współczynnika $VIF=\frac{1}{1-R^2_j}$ (ang. *Variance Inflation Factor*), gdzie $R^2_j$ jest współczynnikiem determinacji modelu pomocniczego, w którym zmienna objaśnianą jest $X_j$ a pozostałe są zmiennymi objaśniającymi; czasami stosuje się też współczynnika tolerancji $tol = 1-R^2_j$,
+
+-   co do zasady zmienne nadmiarowe wyklucza się z modelu, ponieważ nie wnoszą one nowej informacji, a jednocześnie podwyższają błędy standardowe estymacji pozostałych zmiennych objaśniających;
+
+------------------------------------------------------------------------
+
+::: {#exm-redund}
+Dane pochodzą z badania blisko 54000 diamentów w roku 2008 [@wickhamGgplot2CreateElegant2018]. Objęło 10 parametrów: cenę (`price`), wagę (`carat`), jakość cięcia (`cut`), kolor (`color`), przejrzystość (`clarity`) oraz kilka parametrów określających wymiary diamentu przedstawionych na @fig-1. Ze wspomnianego zbioru wylosowano jedynie 1000 obserwacji do dalszych analiz.
+
+![Wymiary diamentu](diamenty1.png){#fig-1}
+:::
+
+------------------------------------------------------------------------
+
+W celu określenia wpływu poszczególnych parametrów na cenę zbudowano model zawierający wagę oraz wymiary diamentu. Otrzymano następujący model
+
+```{r}
+set.seed(44)
+proba_losowa1 <- sample_n(diamonds, size = 1000)
+mod.full <- lm(price~carat+depth+table+x+y+z, data = proba_losowa1)
+mod.full |> 
+  broom::tidy() |> 
+  huxtable::hux()
+```
+
+------------------------------------------------------------------------
+
+Przy czym niektóre zmienne okazują się być nadmiarowe, ponieważ
+
+```{r}
+#| label: fig-collinear
+#| fig-cap: Współczynniki VIF dla poszczególnych zmiennych modelu
+v <- check_collinearity(mod.full)
+plot(v)
+```
+
+Nie zaleca się usuwania jednocześnie wszystkich zmiennych wykazujących nadmiarowość ponieważ po usunięciu części redundandnych zmiennych inne mogą przestać wykazywać nadmiarowość. Zaleca się pojedynczą eliminację nadmiarowych zmiennych zaczynając od tej, która wykazuje największą nadmiarowość.
+
+------------------------------------------------------------------------
+
+Po usunięciu zmiennych `x` i `y` nie ma już zmiennych z wysoką nadmiarowością
+
+```{r}
+#| label: fig-collinear2
+#| fig-cap: Współczynniki VIF po usunięciu x i y
+mod2 <- update(mod.full, .~.-x)
+mod3 <- update(mod2, .~.-y)
+v <- check_collinearity(mod3)
+plot(v)
+```
+
+------------------------------------------------------------------------
+
+Efektem usunięcia zmiennych nadmiarowych jest spadek błędów standardowych estymacji oraz zmiana wielkości efektów
+
+```{r}
+modelsummary(list(mod.full, mod3), gof_map = NA, coef_omit = "Intercept", estimate = "{estimate} ({std.error})", statistic = NULL)
+```
+
+## Źródła
